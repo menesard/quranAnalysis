@@ -1,0 +1,16 @@
+# Gizli bilgiler
+.env
+.env.*
+!.env.example
+
+# Önbellek ve indirilen veri (API'den yeniden üretilebilir)
+data/cache/
+data/quran.json
+reports/
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
