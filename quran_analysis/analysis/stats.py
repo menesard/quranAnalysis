@@ -50,8 +50,28 @@ def zipf_fit(freq: Counter, top: int | None = None) -> dict:
     return {
         "n": len(counts),
         "exponent": round(-slope, 4),
+        "intercept": round(intercept, 4),  # doğal logaritma cinsinden
         "r_squared": round(1 - ss_res / ss_tot, 4) if ss_tot else None,
     }
+
+
+def binomial_tail(k: int, n: int, p: float) -> float:
+    """P(X >= k), X ~ Binom(n, p). Örüntünün tesadüfen bu kadar sık görülme olasılığı."""
+    if k <= 0:
+        return 1.0
+    if k > n:
+        return 0.0
+    return min(1.0, sum(math.comb(n, i) * p ** i * (1 - p) ** (n - i) for i in range(k, n + 1)))
+
+
+def spearman(xs: Sequence[float], ys: Sequence[float]) -> float | None:
+    """Sıra korelasyonu (doğrusal olmayan ama tekdüze ilişkiler için)."""
+    if len(xs) < 2:
+        return None
+    try:
+        return round(statistics.correlation(xs, ys, method="ranked"), 4)
+    except (statistics.StatisticsError, TypeError):
+        return None
 
 
 def pearson(xs: Sequence[float], ys: Sequence[float]) -> float | None:

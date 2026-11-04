@@ -7,7 +7,7 @@ from collections import Counter, defaultdict
 from .. import arabic
 from ..corpus import Corpus
 from .counts import TextOptions
-from .stats import describe, pearson
+from .stats import describe, pearson, spearman
 
 
 def page_distribution(c: Corpus) -> dict:
@@ -31,11 +31,15 @@ def order_correlation(c: Corpus, opts: TextOptions = TextOptions()) -> dict:
     mushaf = [s.id for s in rows]
     nuzul = [int(s.revelation_order) for s in rows]
     lengths = [len(s.verses) for s in rows]
+    all_ids = [s.id for s in c.surahs]
+    all_len = [len(s.verses) for s in c.surahs]
     return {
         "n": len(rows),
         "mushaf_vs_revelation": pearson(mushaf, nuzul),
-        "mushaf_vs_verse_count": pearson([s.id for s in c.surahs], [len(s.verses) for s in c.surahs]),
+        "mushaf_vs_verse_count": pearson(all_ids, all_len),
+        "mushaf_vs_verse_count_spearman": spearman(all_ids, all_len),
         "revelation_vs_verse_count": pearson(nuzul, lengths),
+        "revelation_vs_verse_count_spearman": spearman(nuzul, lengths),
     }
 
 

@@ -22,6 +22,16 @@ from typing import Any
 from .cache import JsonCache
 
 
+RETRY_STATUS = (429, 500, 502, 503, 504)
+
+
+def _retry_after(e: urllib.error.HTTPError) -> float | None:
+    try:
+        return min(float(e.headers.get("Retry-After", "")), 60.0)
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
 class ApiError(RuntimeError):
     def __init__(self, status: int, message: str):
         super().__init__(f"HTTP {status}: {message}")
@@ -38,6 +48,7 @@ class DiyanetClient:
         timeout: float = 30.0,
         retries: int = 3,
         min_interval: float = 0.2,
+        backoff: float = 1.0,
     ):
         if not token:
             raise ValueError(
@@ -50,6 +61,7 @@ class DiyanetClient:
         self.timeout = timeout
         self.retries = retries
         self.min_interval = min_interval
+        self.backoff = backoff
         self._last_request = 0.0
 
     def __repr__(self) -> str:  # token'ı asla loglara yazma
@@ -74,29 +86,40 @@ class DiyanetClient:
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self._token}",
-            "User-Agent": "quran-analysis/0.1",
+            "User-Agent": "quran-analysis/0.2",
         }
-        last_exc: Exception | None = None
+        last_exc: Exception | str | None = None
         for attempt in range(self.retries):
             wait = self.min_interval - (time.monotonic() - self._last_request)
             if wait > 0:
                 time.sleep(wait)
             self._last_request = time.monotonic()
             req = urllib.request.Request(url, headers=headers)
+            last_try = attempt + 1 >= self.retries
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                    return json.loads(resp.read().decode("utf-8"))
+                    raw = resp.read()
             except urllib.error.HTTPError as e:
                 body = e.read().decode("utf-8", "replace")[:300]
-                if e.code in (429, 500, 502, 503, 504) and attempt + 1 < self.retries:
-                    time.sleep(2 ** attempt)
+                if e.code in RETRY_STATUS and not last_try:
                     last_exc = e
+                    time.sleep(_retry_after(e) or self.backoff * 2 ** attempt)
                     continue
+                if e.code in (401, 403):
+                    body = ("Yetkisiz: token geçersiz, süresi dolmuş ya da bu uç noktaya "
+                            f"erişim izni yok. ({body})")
                 raise ApiError(e.code, body) from None
-            except urllib.error.URLError as e:
+            except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
                 last_exc = e
-                time.sleep(2 ** attempt)
-        raise ApiError(0, f"Bağlantı kurulamadı: {last_exc}")
+                if not last_try:
+                    time.sleep(self.backoff * 2 ** attempt)
+                continue
+            try:
+                return json.loads(raw.decode("utf-8-sig"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                snippet = raw[:200].decode("utf-8", "replace")
+                raise ApiError(0, f"JSON olmayan yanıt: {snippet!r}") from None
+        raise ApiError(0, f"Bağlantı kurulamadı ({self.retries} deneme): {last_exc}")
 
     def _lang_params(self) -> dict[str, Any]:
         return {"language": self.language} if self.language else {}
@@ -112,9 +135,19 @@ class DiyanetClient:
         return _unwrap(self.get(f"/api/v1/verses/page/{page}", self._lang_params()))
 
 
+_LIST_KEYS = ("data", "verses", "items", "result", "results")
+
+
 def _unwrap(payload: Any) -> list[dict]:
-    if isinstance(payload, dict) and "data" in payload:
-        payload = payload["data"]
-    if not isinstance(payload, list):
-        raise ApiError(0, f"Beklenmeyen yanıt biçimi: {type(payload).__name__}")
-    return payload
+    """``{"data": [...]}``, ``{"data": {"verses": [...]}}`` veya düz liste kabul eder."""
+    for _ in range(3):
+        if isinstance(payload, list):
+            return payload
+        if not isinstance(payload, dict):
+            break
+        key = next((k for k in _LIST_KEYS if k in payload), None)
+        if key is None:
+            break
+        payload = payload[key]
+    keys = sorted(payload)[:10] if isinstance(payload, dict) else type(payload).__name__
+    raise ApiError(0, f"Beklenmeyen yanıt biçimi: {keys}")

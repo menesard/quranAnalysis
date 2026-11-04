@@ -43,6 +43,7 @@ ABJAD = {
     "ظ": 900, "غ": 1000,
     # varyantların geleneksel değerleri
     "آ": 1, "أ": 1, "إ": 1, "ٱ": 1, "ء": 1, "ؤ": 6, "ئ": 10, "ى": 10, "ة": 5,
+    "ی": 10, "ک": 20,  # Farsça yazım varyantları
 }
 
 
@@ -55,6 +56,11 @@ def strip_diacritics(text: str, keep_dagger_alif: bool = False) -> str:
                 out.append("ا")
             continue
         if cp in HARAKAT or cp in QURANIC_MARKS or cp in EXTRA_MARKS or cp == TATWEEL:
+            continue
+        # Listede olmayan diğer birleşik işaretler (ör. U+08F0 açık tenvin) ve
+        # görünmez biçim karakterleri (ZWNJ/ZWJ) atılır; aksi halde aşağıdaki
+        # temizlikte boşluğa dönüşüp kelimeyi ikiye bölerler.
+        if unicodedata.category(ch) in ("Mn", "Me", "Cf"):
             continue
         out.append(ch)
     return "".join(out)
