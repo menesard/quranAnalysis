@@ -19,7 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterator
 
-from .client import DiyanetClient
+from . import reference
+from .client import ApiError, DiyanetClient
 
 
 @dataclass
@@ -65,7 +66,36 @@ class Corpus:
             yield from s.verses
 
     def surah(self, sid: int) -> Surah:
-        return next(s for s in self.surahs if s.id == sid)
+        for s in self.surahs:
+            if s.id == sid:
+                return s
+        raise KeyError(f"Sure bulunamadı: {sid}")
+
+    def validate(self) -> list[str]:
+        """Veriyi Hafs/Kûfe referans sayılarıyla karşılaştırır; sorun listesi döner."""
+        issues: list[str] = []
+        ids = [s.id for s in self.surahs]
+        missing = sorted(set(range(1, reference.SURAH_COUNT + 1)) - set(ids))
+        if missing:
+            issues.append(f"Eksik sureler: {missing}")
+        extra = sorted(i for i in set(ids) if not 1 <= i <= reference.SURAH_COUNT)
+        if extra:
+            issues.append(f"Geçersiz sure numaraları: {extra}")
+        if len(ids) != len(set(ids)):
+            issues.append("Tekrarlanan sure numaraları var")
+        for s in self.surahs:
+            if not 1 <= s.id <= reference.SURAH_COUNT:
+                continue
+            exp = reference.expected_verses(s.id)
+            nums = [v.n for v in s.verses]
+            if len(nums) != exp:
+                issues.append(f"{s.id} {s.name_tr}: {exp} ayet bekleniyordu, {len(nums)} var")
+            elif nums != list(range(1, exp + 1)):
+                issues.append(f"{s.id} {s.name_tr}: ayet numaraları 1..{exp} sırasında değil")
+            empty = [v.n for v in s.verses if not v.arabic.strip()]
+            if empty:
+                issues.append(f"{s.id} {s.name_tr}: Arapça metni boş ayetler {empty[:10]}")
+        return issues
 
     # -- kaydet / yükle -----------------------------------------------------
     def to_dict(self) -> dict:
@@ -102,29 +132,57 @@ class Corpus:
 
 
 # -- API -> Corpus ----------------------------------------------------------
+def _first(d: dict, *keys):
+    """Verilen anahtarlardan ilk dolu olanı döndürür (API alan adları sürüme göre değişebilir)."""
+    for k in keys:
+        v = d.get(k)
+        if v not in (None, ""):
+            return v
+    return None
+
+
+def _int_or_none(v) -> int | None:
+    try:
+        return int(v) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _text(v) -> str:
+    """``{"text": ...}`` nesnesi ya da düz metin kabul eder."""
+    if isinstance(v, dict):
+        return v.get("text") or ""
+    return v if isinstance(v, str) else ""
+
+
 def _chapter_meta(ch: dict) -> Surah:
-    g = ch.get
+    sid = _int_or_none(_first(ch, "SureId", "sure_id", "surah_id", "id"))
+    if sid is None:
+        raise ApiError(0, f"Sure kaydında numara yok: {sorted(ch)[:10]}")
     return Surah(
-        id=int(g("SureId") or g("id")),
-        name_tr=g("SureNameTurkish") or g("name_tr") or "",
-        name_ar=g("SureNameArabic") or g("name_ar") or "",
-        verse_count=int(g("AyetCount") or g("verses_count") or 0),
-        revelation_order=g("InisOrder"),
-        juz=g("Cuz"),
-        first_page=g("FirstPage"),
-        basmala=g("BesmeleVisible"),
+        id=sid,
+        name_tr=_first(ch, "SureNameTurkish", "name_tr", "name") or "",
+        name_ar=_first(ch, "SureNameArabic", "name_ar") or "",
+        verse_count=_int_or_none(_first(ch, "AyetCount", "verses_count", "verse_count")) or 0,
+        revelation_order=_int_or_none(_first(ch, "InisOrder", "revelation_order")),
+        juz=_int_or_none(_first(ch, "Cuz", "juz")),
+        first_page=_int_or_none(_first(ch, "FirstPage", "first_page")),
+        basmala=_first(ch, "BesmeleVisible", "basmala"),
     )
 
 
 def _verse(raw: dict, surah_id: int) -> Verse:
-    arabic = (raw.get("arabic_script") or {}).get("text") or raw.get("text_arabic") or ""
-    tr = (raw.get("translation") or {}).get("text") or ""
+    arabic = _text(_first(raw, "arabic_script", "text_arabic", "arabic", "text"))
+    tr = _text(_first(raw, "translation", "text_translation", "meal"))
+    n = _int_or_none(_first(raw, "verse_id_in_surah", "verse_number", "ayet_no", "verse_id"))
+    if n is None:
+        raise ApiError(0, f"Ayet kaydında ayet numarası yok: {sorted(raw)[:10]}")
     return Verse(
-        surah=int(raw.get("surah_id") or surah_id),
-        n=int(raw["verse_id_in_surah"]),
+        surah=_int_or_none(_first(raw, "surah_id", "sure_id")) or surah_id,
+        n=n,
         arabic=arabic,
         translation=tr,
-        page=raw.get("page_number"),
+        page=_int_or_none(_first(raw, "page_number", "page")),
     )
 
 
@@ -136,6 +194,8 @@ def build_corpus(client: DiyanetClient, progress: Callable[[str], None] | None =
         seen: dict[int, Verse] = {}
         for raw in client.chapter_verses(s.id):
             v = _verse(raw, s.id)
+            if v.surah != s.id:  # başka sureye ait kayıt karışmışsa atla
+                continue
             seen.setdefault(v.n, v)  # API bazen aynı ayeti tekrarlıyor
         s.verses = [seen[k] for k in sorted(seen)]
         if s.verse_count and len(s.verses) != s.verse_count:

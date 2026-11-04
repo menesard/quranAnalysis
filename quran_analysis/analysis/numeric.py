@@ -12,6 +12,7 @@ from typing import Iterable
 
 from ..corpus import Corpus
 from .counts import TextOptions, all_surah_counts, totals
+from .stats import binomial_tail
 
 
 def is_prime(n: int) -> bool:
@@ -28,7 +29,14 @@ def is_prime(n: int) -> bool:
 
 
 def divisibility_report(c: Corpus, divisor: int = 19, opts: TextOptions = TextOptions()) -> dict:
-    """Toplamlar ve sure bazında sayımların verilen sayıya bölünebilirliği."""
+    """Toplamlar ve sure bazında sayımların verilen sayıya bölünebilirliği.
+
+    Sure bazında, bölünebilen sure sayısı tesadüf beklentisiyle (n/divisor)
+    karşılaştırılır ve tek yönlü binom p-değeri verilir: küçük p (ör. < 0.05)
+    örüntünün tesadüfle açıklanmasının zor olduğunu gösterir.
+    """
+    if divisor < 2:
+        raise ValueError("Bölen en az 2 olmalı")
     t = totals(c, opts)
     total_checks = {
         k: {"value": t[k], "divisible": t[k] % divisor == 0, "remainder": t[k] % divisor}
@@ -37,11 +45,12 @@ def divisibility_report(c: Corpus, divisor: int = 19, opts: TextOptions = TextOp
     }
     rows = all_surah_counts(c, opts)
     per_field = {}
-    for f in ("verses", "words", "letters"):
+    for f in ("verses", "words", "letters", "abjad"):
         divisible = [r.id for r in rows if getattr(r, f) % divisor == 0]
         per_field[f] = {
             "divisible_count": len(divisible),
             "expected_by_chance": round(len(rows) / divisor, 2),
+            "p_value": round(binomial_tail(len(divisible), len(rows), 1 / divisor), 4),
             "surahs": divisible,
         }
     return {"divisor": divisor, "totals": total_checks, "per_surah": per_field, "options": asdict(opts)}

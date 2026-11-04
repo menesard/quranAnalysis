@@ -23,7 +23,11 @@ def load_dotenv(path: str | os.PathLike = ".env") -> None:
             continue
         key, _, value = line.partition("=")
         key = key.strip().removeprefix("export ").strip()
-        value = value.strip().strip('"').strip("'")
+        value = value.strip()
+        if value[:1] in ("'", '"') and value[-1:] == value[:1] and len(value) >= 2:
+            value = value[1:-1]
+        else:
+            value = value.split(" #", 1)[0].rstrip()  # satır sonu yorumu
         os.environ.setdefault(key, value)
 
 
@@ -41,6 +45,11 @@ class Settings:
     @property
     def corpus_path(self) -> Path:
         return self.data_dir / "quran.json"
+
+    @property
+    def morphology_path(self) -> Path:
+        env = os.environ.get("QURAN_MORPHOLOGY_PATH")
+        return Path(env) if env else self.data_dir / "quranic-corpus-morphology-0.4.txt"
 
 
 def get_settings(env_file: str | os.PathLike = ".env") -> Settings:

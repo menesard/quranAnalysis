@@ -6,6 +6,7 @@
 # Önbellek ve indirilen veri (API'den yeniden üretilebilir)
 data/cache/
 data/quran.json
+data/quranic-corpus-morphology*.txt
 reports/
 
 __pycache__/

@@ -25,6 +25,7 @@ cp .env.example .env      # sonra .env içine kendi token'ınızı yazın
 | `DIB_KURAN_API_BASE_URL` | API kök adresi | `https://api.diyanet.gov.tr` |
 | `DIB_KURAN_LANGUAGE` | Meal dili parametresi | `tr` |
 | `QURAN_DATA_DIR` | Veri ve önbellek klasörü | `data` |
+| `QURAN_MORPHOLOGY_PATH` | Kök sayımı için morfoloji dosyası | `data/quranic-corpus-morphology-0.4.txt` |
 
 ## Kullanım
 
@@ -35,9 +36,35 @@ python -m quran_analysis surahs --csv sureler.csv
 python -m quran_analysis word الله              # Arapça kelime sayımı (hareke yok sayılır)
 python -m quran_analysis word الله --fold       # elif/hemze varyantlarını birleştirerek
 python -m quran_analysis meal-word rahmet       # Türkçe meal metninde kelime sayımı
-python -m quran_analysis divisible --by 19      # bölünebilirlik raporu
+python -m quran_analysis meal-word rahmet --prefix   # rahmeti, rahmetinden ... dahil
+python -m quran_analysis divisible --by 19      # bölünebilirlik raporu (binom p-değeriyle)
 python -m quran_analysis stats                  # istatistik + yapı analizleri
+python -m quran_analysis validate               # 114 sure / 6236 ayet referansıyla doğrula
+python -m quran_analysis report                 # grafikli HTML rapor -> reports/rapor.html
+python -m quran_analysis root رحم               # kök bazlı sayım (aşağıya bakın)
+python -m quran_analysis roots --top 30         # en sık kökler
 ```
+
+### Kök bazlı sayım
+
+Arapçada bir kökten (ör. ر ح م) pek çok kelime türer (رحمة، الرحمن، رحيم ...).
+`root` komutu, el ile doğrulanmış [Quranic Arabic Corpus](https://corpus.quran.com)
+morfoloji verisini kullanır. Dosya GNU GPL lisanslı olduğu için depoya eklenmez:
+<https://corpus.quran.com/download/> adresinden `quranic-corpus-morphology-0.4.txt`
+dosyasını indirip `data/` altına koyun (veya `QURAN_MORPHOLOGY_PATH` / `--morphology`
+ile yolunu verin). Kök Arapça (`رحم`, `ر ح م`, `رَحِمَ`) ya da Buckwalter (`rHm`)
+yazılabilir; hemzenin yazımları (أ إ ؤ ئ) tek harf sayılır.
+
+Bu veri Tanzil Osmanî metnine dayanır; kelime sınırları Diyanet metnindeki boşluk
+bazlı ayrımdan farklı olabileceği için kök sayıları `word` sayılarıyla birebir
+karşılaştırılmamalıdır.
+
+### HTML rapor
+
+`report` komutu tek dosyalık, bağımlılıksız bir HTML üretir: özet kutuları, sure
+başına ayet/kelime grafikleri (Mekkî/Medenî renkli), harf frekansı, Zipf grafiği,
+Mekkî/Medenî karşılaştırması ve bölünebilirlik tabloları. Her grafiğin altında aynı
+veriyi veren açılır bir tablo vardır; koyu temayı destekler.
 
 İlk `fetch` her API yanıtını `data/cache/` altına kaydeder; sonraki çalıştırmalar
 API'ye gitmez. Analizler yalnızca `data/quran.json` dosyasıyla çalışır.
@@ -63,6 +90,9 @@ quran_analysis/
   cache.py           dosya tabanlı JSON önbellek
   corpus.py          API verisini kararlı bir şemaya dönüştürme ve kaydetme
   arabic.py          hareke temizleme, kelime/harf ayrıştırma, ebced
+  reference.py       Hafs/Kûfe referans ayet sayıları (doğrulama için)
+  morphology.py      kök/lemma sayımı (Quranic Arabic Corpus)
+  report.py          grafikli HTML rapor
   analysis/
     counts.py        sure/ayet/kelime/harf sayımları, frekanslar, kelime arama
     numeric.py       bölünebilirlik, asal sayı, tek/çift testleri
@@ -91,6 +121,9 @@ Kur'an'daki sayısal örüntü iddialarının çoğu, belirli bir imla ve sayma 
 seçimine bağlıdır. Bu proje iddiaları **tekrarlanabilir şekilde test etmek**
 için tasarlandı: her sayım tercihi açıkça belirtilir ve `stats.permutation_baseline`
 ile bir örüntünün tesadüfen ne sıklıkla ortaya çıkacağı tahmin edilebilir.
+`divisible` raporu, bölünebilen sure sayısını tesadüf beklentisiyle karşılaştırıp
+tek yönlü binom p-değeri verir. Çok sayıda ölçü ve bölen denendiğinde bazılarının
+tesadüfen küçük p vereceğini unutmayın (çoklu karşılaştırma sorunu).
 
 ## Test
 
